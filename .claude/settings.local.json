@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(py test_model_load.py)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
