@@ -118,7 +118,7 @@ class PromptTemplates:
     @staticmethod
     def get_temperature_comparison_prompt(comparison_data: dict) -> str:
         """
-        어제와 오늘의 평균 온도 비교를 위한 프롬프트
+        어제와 오늘의 평균 온도 비교를 위한 프롬프트 (개선 버전)
 
         Args:
             comparison_data: WeatherAnalyzer.compare_two_days()의 결과
@@ -131,39 +131,73 @@ class PromptTemplates:
         temp_change = comparison_data['temp_change']
         direction = comparison_data['temp_change_direction']
 
-        today_data = comparison_data['today_analysis']
+        prompt = f"""<instruction>
+당신은 공원 전광판 메시지 전문가입니다. 주어진 온도 데이터를 간결한 한 문장으로 변환하세요.
+</instruction>
 
-        # 온도 변화에 따른 조언 힌트
-        if abs(temp_change) < 1:
-            advice_hint = "어제와 비슷한 날씨"
-        elif direction == '상승':
-            if temp_change >= 5:
-                advice_hint = "어제보다 많이 따뜻함, 얇게 입기"
-            else:
-                advice_hint = "어제보다 약간 따뜻함"
-        else:  # 하강
-            if abs(temp_change) >= 5:
-                advice_hint = "어제보다 많이 추움, 따뜻하게 입기"
-            else:
-                advice_hint = "어제보다 약간 선선함"
+<rules>
+1. 반드시 한 문장만 출력하세요
+2. 마크다운(**, ---, #), 특수문자, 이모지 사용 금지
+3. 괄호나 설명 추가 금지
+4. 질문 형식 금지
+5. "출력:", "답:", "메시지:" 같은 레이블 없이 메시지만 작성
+6. 40-70자 길이로 작성
+7. 온도 차이를 구체적 숫자로 명시 (예: "5도", "10도")
+</rules>
 
-        # 일교차 조언
-        if today_data['temp_diff'] >= 15:
-            diff_advice = "일교차가 매우 크니 겉옷 필수"
-        elif today_data['temp_diff'] >= 10:
-            diff_advice = "일교차가 크니 겉옷 챙기기"
-        else:
-            diff_advice = ""
+<bad_examples>
+❌ "---\n**전광판 메시지:**\n오늘 공원은..."
+❌ "오늘은 춥습니다. (또는) 따뜻하게 입고..."
+❌ "오늘은 추워요. 어떻게 생각하시나요?"
+❌ "출력: 오늘은 춥습니다..."
+</bad_examples>
 
-        prompt = f"""전광판에 표시할 날씨 안내 문구를 한 문장으로 작성하세요.
+<good_examples>
+입력: 어제 20도, 오늘 30도
+출력: 어제보다 10도 올라 무더워졌습니다. 수분을 충분히 섭취하세요.
 
-날씨 정보:
-- 어제 평균: {yesterday_avg:.1f}°C → 오늘 평균: {today_avg:.1f}°C ({temp_change:+.1f}°C {direction})
-- 오늘 최저/최고: {today_data['min_temp']}°C / {today_data['max_temp']}°C
-- 조언: {advice_hint}{', ' + diff_advice if diff_advice else ''}
+입력: 어제 10도, 오늘 -10도
+출력: 어제보다 20도 급격히 내려갔습니다. 방한 준비 철저히 하세요.
 
-위 정보를 바탕으로 시민들에게 친근하게 날씨를 알리는 한 문장을 작성하세요. (50자 이내)
+입력: 어제 15도, 오늘 16도
+출력: 어제와 비슷한 날씨입니다. 산책하기 좋은 하루예요.
 
-문구:"""
+입력: 어제 25도, 오늘 15도
+출력: 어제보다 10도 낮아졌습니다. 외출 시 겉옷 챙기세요.
+
+입력: 어제 5도, 오늘 8도
+출력: 어제보다 3도 올라 조금 포근해졌습니다. 좋은 하루 되세요.
+
+입력: 어제 18도, 오늘 12도
+출력: 어제보다 6도 내려가 쌀쌀합니다. 따뜻하게 입으세요.
+</good_examples>
+
+<task>
+입력: 어제 {yesterday_avg:.0f}도, 오늘 {today_avg:.0f}도
+출력:"""
+
+        return prompt
+
+    @staticmethod
+    def get_temperature_chat_prompt(yesterday_temp: float, today_temp: float) -> str:
+        """
+        Chat 형식의 온도 비교 프롬프트
+        파인튜닝 데이터와 동일한 형식 사용
+
+        Args:
+            yesterday_temp: 어제 평균 온도
+            today_temp: 오늘 평균 온도
+
+        Returns:
+            str: Chat 형식 프롬프트
+        """
+        system_prompt = "당신은 공원 전광판 메시지 전문가입니다. 온도 정보를 받아 40-70자 길이의 간결한 한 문장 메시지를 작성하세요. 온도 차이를 구체적 숫자로 명시하고 공원 관련 조언을 포함하세요."
+
+        prompt = f"""<|im_start|>system
+{system_prompt}<|im_end|>
+<|im_start|>user
+어제 {yesterday_temp:.0f}도, 오늘 {today_temp:.0f}도<|im_end|>
+<|im_start|>assistant
+"""
 
         return prompt
