@@ -34,6 +34,10 @@ models/
 *.safetensors
 *.gguf
 
+# 파인튜닝 모델 및 체크포인트
+finetuned_model/
+checkpoint-*/
+
 # IDE
 .vscode/
 .idea/

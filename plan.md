@@ -48,10 +48,161 @@
 
 ## 📋 단계별 개선 계획
 
-## Phase 1: 즉시 개선 (1-2일)
+## ⚡ Phase 0: 규칙 기반 제거 및 LLM 중심 파이프라인 (최우선, 즉시 실행)
 
-### 1.1 프롬프트 엔지니어링
-**목적**: 모델에게 더 명확한 지시
+### 🎯 핵심 철학
+**"규칙을 짜지 말고, 모델이 학습하게 하자"**
+
+현재 문제점:
+- ❌ `generate_comparison_data.py`: if/else로 온도 구간별 메시지 하드코딩
+- ❌ `generate_training_data_manual.py`: if/else로 카테고리별 메시지 하드코딩
+- ❌ `output_cleaner.py`: regex/if/else로 후처리 룰 하드코딩
+
+→ **유연성 부족, 확장 어려움, 새로운 상황 대응 불가**
+
+### 0.1 Claude 기반 고품질 학습 데이터 생성 (규칙 없이)
+
+**목적**: if/else 없이 자연스럽고 다양한 메시지 생성
+
+**기존 방식 (규칙 기반):**
+```python
+if abs_diff <= 1:
+    messages = ["어제보다 1도 따뜻해졌습니다..."]
+elif 2 <= abs_diff <= 4:
+    messages = ["어제보다 3도 따뜻해졌습니다..."]
+# 100줄의 if/else...
+```
+
+**새로운 방식 (LLM 기반):**
+```python
+# Claude에게 한 번에 요청
+prompt = """
+다음 온도 변화 시나리오에 대해 전광판 메시지를 생성하세요.
+
+요구사항:
+- 40-70자 이내
+- 온도 차이 숫자 명시
+- 자연스러운 한국어
+- "어제보다" 표현 사용
+
+시나리오 100개를 생성하고 JSON 형식으로 반환:
+{yesterday: -15, today: -10, message: "..."}
+"""
+
+# Claude가 다양하고 자연스러운 메시지 생성
+# 규칙 없이 패턴 학습
+```
+
+**구현:**
+1. Claude API를 이용한 대량 데이터 생성 스크립트
+2. 온도 시나리오 500개 생성 (규칙 없이 다양성 확보)
+3. Claude가 자연스러운 표현 생성
+
+### 0.2 DPO 데이터셋 생성 (Good vs Bad 예시)
+
+**목적**: 규칙 없이 "좋은 출력"을 학습
+
+**데이터 형식:**
+```json
+{
+  "prompt": "어제 0도, 오늘 1도",
+  "chosen": "어제보다 1도 따뜻해졌습니다. 산책하기 좋은 날씨예요.",
+  "rejected": "<think>음.. 1도 차이니까...</think>\n전광판에 표시할 메시지:\n\n안녕하세요, 오늘 공원은 더 시원합니다. 외출 시 가벼운 겉옷을 챙기세요. 감사합니다. 2월 5일 (화요일) 오전 9시 38분\n\n이 메시지가 적절한가요?"
+}
+```
+
+**생성 방법:**
+1. 기존 모델로 100개 프롬프트 실행 (나쁜 예시 수집)
+2. Claude가 같은 프롬프트에 대해 좋은 예시 생성
+3. 100쌍의 chosen/rejected 데이터 생성
+
+**효과:**
+- 규칙 없이 "특수 토큰 제거", "질문 제거" 등을 학습
+- 모델이 자동으로 깔끔한 출력 생성
+
+### 0.3 Output Cleaning을 프롬프트/학습으로 대체
+
+**기존 방식 (제거 대상):**
+```python
+# output_cleaner.py - 50줄의 regex 규칙
+text = re.sub(r'<[^>]+>', '', text)
+text = re.sub(r'\?.*$', '', text)
+# ... 10개의 regex 규칙
+```
+
+**새로운 방식 1: 프롬프트 개선**
+```python
+# 모델에게 직접 요구
+prompt = """아래 입력을 공원 전광판에 표시할 메시지로 변환하세요.
+
+중요: 특수문자, 질문, 메타 설명 없이 바로 메시지만 출력하세요.
+
+나쁜 예시:
+- "<think>...</think> 전광판에 표시할 메시지: 오늘은..."
+- "오늘은 따뜻합니다. 이 메시지가 적절한가요?"
+
+좋은 예시:
+- "어제보다 10도 따뜻해졌습니다. 가벼운 옷차림을 권장합니다."
+
+입력: {input}
+출력:"""
+```
+
+**새로운 방식 2: DPO 학습**
+- chosen/rejected 쌍으로 학습하면 자동으로 깔끔한 출력
+- 규칙 없이 모델이 패턴 학습
+
+### 0.4 Claude 평가 루프 (자동 품질 관리)
+
+**목적**: 규칙 없이 품질 평가 및 개선
+
+**구현:**
+```python
+# scripts/claude_evaluation_loop.py
+
+def evaluate_with_claude(outputs):
+    """Claude가 출력 품질 평가"""
+    prompt = f"""
+    다음 전광판 메시지들을 평가하세요 (1-5점):
+
+    평가 기준:
+    - 40-70자 이내인가?
+    - 온도 차이를 숫자로 언급하는가?
+    - 특수문자나 질문이 없는가?
+    - 자연스러운 한국어인가?
+
+    출력: {outputs}
+
+    각 메시지에 점수와 개선 이유를 JSON으로 반환:
+    {{"score": 3, "reason": "...", "improved": "..."}}
+    """
+
+    return claude_api_call(prompt)
+
+# 자동 개선 루프
+for iteration in range(5):
+    outputs = model.generate(test_prompts)
+    evaluations = evaluate_with_claude(outputs)
+
+    # 낮은 점수만 개선
+    low_quality = [e for e in evaluations if e['score'] < 4]
+    improved_data = [(prompt, e['improved']) for e in low_quality]
+
+    # 개선 데이터로 재학습
+    finetune_with_new_data(improved_data)
+```
+
+**효과:**
+- 규칙 없이 Claude가 품질 판단
+- 자동으로 데이터 개선 및 재학습
+- 5번 반복하면 점진적 품질 향상
+
+---
+
+## Phase 1: DPO 학습 및 적용 (1-2일)
+
+### 1.1 DPO 학습 실행
+**목적**: Chosen/Rejected 쌍으로 선호도 학습
 
 **현재 프롬프트:**
 ```
